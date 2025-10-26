@@ -26,7 +26,7 @@ try:
     )
 
     if not MONGO_USERNAME or not MONGO_PASSWORD:
-        raise ValueError("MongoDB credentials not set.")\
+        raise ValueError("MongoDB credentials not set.")  # Fixed: removed backslash
         
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) 
     client.admin.command('ismaster')
@@ -42,16 +42,31 @@ except Exception as e:
 app = Flask(__name__)
 
 @app.route('/')
-def get_groceries():
-    """Fetches all documents from the 'groceries' collection."""
+def get_expenses():  # Renamed to match purpose
+    """Fetches all documents from the '2025' collection."""
     if client is None:
         return jsonify({"error": "Database connection not available."}), 500
     try:
         # Find all documents in the collection
-        groceries = list(collection.find({}, {'_id': 0}))  # Exclude the default '_id' field
-        return jsonify(groceries)
+        expenses = list(collection.find({}))  # Keep _id for now, handle serialization below
+        
+        # Convert ObjectId and datetime to strings for JSON serialization
+        for expense in expenses:
+            if '_id' in expense:
+                expense['_id'] = str(expense['_id'])
+            for daily in expense.get('daily_expenses', []):
+                if 'date' in daily:
+                    daily['date'] = daily['date'].isoformat()
+            for credit in expense.get('credits', []):
+                if 'date' in credit:
+                    credit['date'] = credit['date'].isoformat()
+        
+        return jsonify(expenses)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+import os
+
 if __name__ == '__main__':
-    app.run()
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
