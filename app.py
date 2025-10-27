@@ -43,6 +43,10 @@ except Exception as e:
 
 app = Flask(__name__)
 CORS(app, origins="*")
+# Add these headers to all your Flask responses
+app.response_class.headers.add('Access-Control-Allow-Origin', '*')
+app.response_class.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+app.response_class.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
 def get_month_name_from_date(date_str):
     """Converts date string (YYYY-MM-DD) to month name like 'January', 'February', etc."""
