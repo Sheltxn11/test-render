@@ -42,7 +42,7 @@ except Exception as e:
     client = None
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*")
 
 def get_month_name_from_date(date_str):
     """Converts date string (YYYY-MM-DD) to month name like 'January', 'February', etc."""
@@ -112,11 +112,22 @@ def recalculate_month_totals(doc, previous_balance=0):
     
     return doc
 
-@app.route('/')
-def get_expenses():
-    """Fetches all documents from the '2025' collection."""
+@app.route('/health')
+def health_check():
+    """Health check endpoint."""
+    response = jsonify({"status": "healthy", "message": "Backend is running"})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response, 200
+
+@app.route('/api/monthly-data')
+def get_monthly_data():
+    """Fetches all monthly documents from the '2025' collection."""
     if client is None:
-        return jsonify({"error": "Database connection not available."}), 500
+        response = jsonify({"error": "Database connection not available."})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
     try:
         # Find all documents in the collection
         expenses = list(collection.find({}))
@@ -124,14 +135,26 @@ def get_expenses():
         # Serialize documents for JSON response
         serialized_expenses = [serialize_document(expense) for expense in expenses]
         
-        return jsonify(serialized_expenses)
+        response = jsonify(serialized_expenses)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
     except Exception as e:
-        logging.error(f"Error fetching expenses: {e}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error fetching monthly data: {e}")
+        response = jsonify({"error": str(e)})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
 
-@app.route('/api/transactions', methods=['POST'])
+@app.route('/api/transactions', methods=['POST', 'OPTIONS'])
 def add_transaction():
     """Add a new transaction to the database."""
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
     if client is None:
         return jsonify({"error": "Database connection not available."}), 500
     
@@ -219,22 +242,25 @@ def add_transaction():
         # Serialize and return
         serialized_doc = serialize_document(final_doc)
         
-        return jsonify({
+        response = jsonify({
             "message": f"Transaction added successfully to {month_name}",
             "data": serialized_doc
-        }), 201
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response, 201
         
     except ValueError as e:
         logging.error(f"Validation error: {e}")
-        return jsonify({"error": str(e)}), 400
+        response = jsonify({"error": str(e)})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 400
     except Exception as e:
         logging.error(f"Error adding transaction: {e}")
-        return jsonify({"error": str(e)}), 500
-    
-@app.route('/health')
-def health_check():
-    print("Health Check")
-    return jsonify({"status": "ok"}), 200
+        response = jsonify({"error": str(e)})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
 
 import os
 
