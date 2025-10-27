@@ -28,7 +28,7 @@ try:
     )
 
     if not MONGO_USERNAME or not MONGO_PASSWORD:
-        raise ValueError("MongoDB credentials not set.")  # Fixed: removed backslash
+        raise ValueError("MongoDB credentials not set.")
         
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) 
     client.admin.command('ismaster')
@@ -42,11 +42,9 @@ except Exception as e:
     client = None
 
 app = Flask(__name__)
-CORS(app, origins="*")
-# Add these headers to all your Flask responses
-app.response_class.headers.add('Access-Control-Allow-Origin', '*')
-app.response_class.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-app.response_class.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+# Simplified CORS configuration - remove redundant headers
+CORS(app, origins="*", methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'])
 
 def get_month_name_from_date(date_str):
     """Converts date string (YYYY-MM-DD) to month name like 'January', 'February', etc."""
@@ -54,7 +52,7 @@ def get_month_name_from_date(date_str):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
         return date_obj.strftime("%B")
     except ValueError:
-        raise ValueError(f"Invalid date format: {date_str}")
+        raise ValueError(f"Invalid date format: {date_str}. Expected YYYY-MM-DD")
 
 def get_previous_month_name(month_name):
     """Get the name of the previous month."""
@@ -71,12 +69,17 @@ def serialize_document(doc):
     """Convert MongoDB document to JSON-serializable format."""
     if '_id' in doc:
         doc['_id'] = str(doc['_id'])
+    
+    # Handle daily_expenses dates
     for daily in doc.get('daily_expenses', []):
-        if 'date' in daily:
+        if 'date' in daily and isinstance(daily['date'], datetime):
             daily['date'] = daily['date'].isoformat()
+    
+    # Handle credits dates
     for credit in doc.get('credits', []):
-        if 'date' in credit:
+        if 'date' in credit and isinstance(credit['date'], datetime):
             credit['date'] = credit['date'].isoformat()
+    
     return doc
 
 def create_month_skeleton(month_name):
@@ -109,29 +112,25 @@ def recalculate_month_totals(doc, previous_balance=0):
     doc['total_expense'] = total_expense
     
     # Balance = previous month's balance + this month's purchases - this month's payments
-    # Or simplified: previous_balance + total_expense - total_credits
     doc['balance'] = previous_balance + total_expense - total_credits
     
-    logging.info(f"Recalculated totals for {doc.get('month', 'Unknown')}: expenses={total_expense}, credits={total_credits}, previous_balance={previous_balance}, new_balance={doc['balance']}")
+    logging.info(f"Recalculated totals for {doc.get('month', 'Unknown')}: "
+                f"expenses={total_expense}, credits={total_credits}, "
+                f"previous_balance={previous_balance}, new_balance={doc['balance']}")
     
     return doc
 
 @app.route('/health')
 def health_check():
     """Health check endpoint."""
-    response = jsonify({"status": "healthy", "message": "Backend is running"})
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response, 200
+    return jsonify({"status": "healthy", "message": "Backend is running"}), 200
 
 @app.route('/api/monthly-data')
 def get_monthly_data():
     """Fetches all monthly documents from the '2025' collection."""
     if client is None:
-        response = jsonify({"error": "Database connection not available."})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 500
+        return jsonify({"error": "Database connection not available."}), 500
+    
     try:
         # Find all documents in the collection
         expenses = list(collection.find({}))
@@ -139,26 +138,17 @@ def get_monthly_data():
         # Serialize documents for JSON response
         serialized_expenses = [serialize_document(expense) for expense in expenses]
         
-        response = jsonify(serialized_expenses)
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response
+        return jsonify(serialized_expenses), 200
     except Exception as e:
         logging.error(f"Error fetching monthly data: {e}")
-        response = jsonify({"error": str(e)})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/transactions', methods=['POST', 'OPTIONS'])
 def add_transaction():
     """Add a new transaction to the database."""
     if request.method == 'OPTIONS':
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response
+        return jsonify({}), 200
+    
     if client is None:
         return jsonify({"error": "Database connection not available."}), 500
     
@@ -166,16 +156,26 @@ def add_transaction():
         data = request.get_json()
         
         # Validate required fields
-        if not all(key in data for key in ['date', 'type', 'amount']):
-            return jsonify({"error": "Missing required fields: date, type, amount"}), 400
+        required_fields = ['date', 'type', 'amount']
+        if not all(key in data for key in required_fields):
+            return jsonify({
+                "error": f"Missing required fields. Required: {', '.join(required_fields)}"
+            }), 400
         
         date_str = data['date']
         transaction_type = data['type']
         amount = float(data['amount'])
+        description = data.get('description', '')  # Optional description field
+        
+        # Validate amount
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than zero"}), 400
         
         # Validate transaction type
         if transaction_type not in ['purchase', 'payment']:
-            return jsonify({"error": "Invalid transaction type. Must be 'purchase' or 'payment'"}), 400
+            return jsonify({
+                "error": "Invalid transaction type. Must be 'purchase' or 'payment'"
+            }), 400
         
         # Get the month name from the date
         month_name = get_month_name_from_date(date_str)
@@ -183,15 +183,20 @@ def add_transaction():
         # Convert date string to datetime object
         transaction_date = datetime.strptime(date_str, "%Y-%m-%d")
         
-        # Find or create month document
+        # Find or create month document (using upsert to avoid race conditions)
         month_doc = collection.find_one({"month": month_name})
         
         if month_doc is None:
             # Create new month skeleton
             month_doc = create_month_skeleton(month_name)
-            collection.insert_one(month_doc)
-            month_doc['_id'] = str(month_doc['_id'])
-            logging.info(f"Created new month document for {month_name}")
+            # Use insert with error handling for race condition
+            try:
+                collection.insert_one(month_doc)
+                logging.info(f"Created new month document for {month_name}")
+            except Exception as insert_error:
+                # If insert fails due to duplicate, fetch existing document
+                logging.warning(f"Month document creation race condition: {insert_error}")
+                month_doc = collection.find_one({"month": month_name})
         
         # Create transaction object
         transaction_entry = {
@@ -199,25 +204,24 @@ def add_transaction():
             "amount": amount
         }
         
+        # Add description if provided
+        if description:
+            transaction_entry["description"] = description
+        
         # Add transaction to appropriate array
         if transaction_type == 'purchase':
             result = collection.update_one(
                 {"month": month_name},
                 {"$push": {"daily_expenses": transaction_entry}}
             )
-            logging.info(f"Added purchase transaction: {amount} on {date_str}. Modified count: {result.modified_count}")
+            logging.info(f"Added purchase: {amount} on {date_str}. Modified: {result.modified_count}")
         else:  # payment
             result = collection.update_one(
                 {"month": month_name},
                 {"$push": {"credits": transaction_entry}}
             )
-            logging.info(f"Added payment transaction: {amount} on {date_str}. Modified count: {result.modified_count}")
+            logging.info(f"Added payment: {amount} on {date_str}. Modified: {result.modified_count}")
         
-        # Log current state before recalculation
-        temp_doc = collection.find_one({"month": month_name})
-        logging.info(f"Current state - Expenses count: {len(temp_doc.get('daily_expenses', []))}, Credits count: {len(temp_doc.get('credits', []))}")
-        
-        # Recalculate totals
         # Fetch the updated document
         updated_doc = collection.find_one({"month": month_name})
         
@@ -236,9 +240,12 @@ def add_transaction():
         # Update the document with new totals
         update_result = collection.update_one(
             {"month": month_name},
-            {"$set": {"total_expense": updated_doc['total_expense'], "balance": updated_doc['balance']}}
+            {"$set": {
+                "total_expense": updated_doc['total_expense'], 
+                "balance": updated_doc['balance']
+            }}
         )
-        logging.info(f"Updated totals for {month_name}. Modified count: {update_result.modified_count}")
+        logging.info(f"Updated totals for {month_name}. Modified: {update_result.modified_count}")
         
         # Fetch the final updated document
         final_doc = collection.find_one({"month": month_name})
@@ -246,25 +253,17 @@ def add_transaction():
         # Serialize and return
         serialized_doc = serialize_document(final_doc)
         
-        response = jsonify({
+        return jsonify({
             "message": f"Transaction added successfully to {month_name}",
             "data": serialized_doc
-        })
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response, 201
+        }), 201
         
     except ValueError as e:
         logging.error(f"Validation error: {e}")
-        response = jsonify({"error": str(e)})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 400
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logging.error(f"Error adding transaction: {e}")
-        response = jsonify({"error": str(e)})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 500
+        return jsonify({"error": str(e)}), 500
 
 import os
 
