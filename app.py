@@ -21,6 +21,7 @@ MONTHS = ["January", "February", "March", "April", "May", "June",
 
 client = None 
 db = None
+db_error_message = None  # Store error for debugging
 
 try:
     # Get credentials from environment variables
@@ -29,8 +30,20 @@ try:
     MONGO_CLUSTER_URI = os.getenv("MONGO_CLUSTER_URI")
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "grocery")
     
+    # Debug: Log which env vars are set (without revealing values)
+    logging.info(f"[DEBUG] MONGO_USERNAME set: {bool(MONGO_USERNAME)}")
+    logging.info(f"[DEBUG] MONGO_PASSWORD set: {bool(MONGO_PASSWORD)}")
+    logging.info(f"[DEBUG] MONGO_CLUSTER_URI set: {bool(MONGO_CLUSTER_URI)}")
+    logging.info(f"[DEBUG] MONGO_CLUSTER_URI value: {MONGO_CLUSTER_URI}")
+    logging.info(f"[DEBUG] MONGO_DB_NAME: {MONGO_DB_NAME}")
+    
     if not MONGO_USERNAME or not MONGO_PASSWORD or not MONGO_CLUSTER_URI:
-        raise ValueError("MongoDB credentials not set. Check your .env file.")
+        missing = []
+        if not MONGO_USERNAME: missing.append("MONGO_USERNAME")
+        if not MONGO_PASSWORD: missing.append("MONGO_PASSWORD")
+        if not MONGO_CLUSTER_URI: missing.append("MONGO_CLUSTER_URI")
+        db_error_message = f"Missing environment variables: {', '.join(missing)}"
+        raise ValueError(db_error_message)
     
     # URL-encode the username and password
     encoded_username = quote_plus(MONGO_USERNAME)
@@ -41,6 +54,8 @@ try:
         f"mongodb+srv://{encoded_username}:{encoded_password}@{MONGO_CLUSTER_URI}/"
         f"?retryWrites=true&w=majority&appName=1PM"
     )
+    
+    logging.info(f"[DEBUG] Attempting MongoDB connection to cluster: {MONGO_CLUSTER_URI}")
         
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) 
     client.admin.command('ismaster')
@@ -48,8 +63,11 @@ try:
     db = client[MONGO_DB_NAME]
 
     logging.info("Successfully connected to MongoDB.")
+    db_error_message = None  # Clear any error on success
 except Exception as e:
+    db_error_message = str(e)
     logging.critical(f"Could not connect to MongoDB: {e}")
+    logging.critical(f"[DEBUG] Exception type: {type(e).__name__}")
     client = None
 
 app = Flask(__name__)
@@ -233,6 +251,23 @@ def health_check():
     """Health check endpoint."""
     return jsonify({"status": "healthy", "message": "Backend is running"}), 200
 
+@app.route('/api/debug/env')
+def debug_env():
+    """Debug endpoint to check environment variables (remove in production)."""
+    return jsonify({
+        "db_connected": client is not None,
+        "db_error": db_error_message,
+        "env_vars": {
+            "MONGO_USERNAME_set": bool(os.getenv("MONGO_USERNAME")),
+            "MONGO_PASSWORD_set": bool(os.getenv("MONGO_PASSWORD")),
+            "MONGO_CLUSTER_URI_set": bool(os.getenv("MONGO_CLUSTER_URI")),
+            "MONGO_CLUSTER_URI_value": os.getenv("MONGO_CLUSTER_URI"),  # Safe to show
+            "MONGO_DB_NAME": os.getenv("MONGO_DB_NAME", "grocery"),
+            "TELEGRAM_BOT_TOKEN_set": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+            "TELEGRAM_CHAT_ID_set": bool(os.getenv("TELEGRAM_CHAT_ID")),
+        }
+    }), 200
+
 # ==================== TELEGRAM BOT ROUTES ====================
 
 @app.route('/api/telegram/webhook', methods=['POST'])
@@ -415,7 +450,10 @@ def send_custom_message():
 def get_available_years():
     """Get list of years that have data in the database."""
     if client is None:
-        return jsonify({"error": "Database connection not available."}), 500
+        return jsonify({
+            "error": "Database connection not available.",
+            "debug_reason": db_error_message or "Unknown error during startup"
+        }), 500
     
     try:
         # Get all collection names (which are years)
@@ -439,7 +477,10 @@ def get_available_years():
 def get_chart_data():
     """Get last N months of data for charts (spans across years)."""
     if client is None:
-        return jsonify({"error": "Database connection not available."}), 500
+        return jsonify({
+            "error": "Database connection not available.",
+            "debug_reason": db_error_message or "Unknown error during startup"
+        }), 500
     
     try:
         months_count = int(request.args.get('months', 10))
