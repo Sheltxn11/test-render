@@ -8,11 +8,15 @@ import requests
 import os
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Tuple
+from dotenv import load_dotenv
 
-# Configuration
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8549689633:AAHYNWAzilgg3Oik4gnopR-MjRp8Pyr5Ktw")
-CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "-5284486289"))
-WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "grocery_tracker_secret_2026")
+# Load environment variables
+load_dotenv()
+
+# Configuration from environment
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
+WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "default_secret")
 
 # Constants
 DATE_FORMAT = "%Y-%m-%d"
@@ -499,3 +503,4 @@ def init_bot(db_helpers: dict) -> TelegramBot:
 def get_bot() -> Optional[TelegramBot]:
     """Get the bot instance."""
     return bot_instance
+
