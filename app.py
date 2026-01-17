@@ -3,8 +3,12 @@ from flask_cors import CORS
 from pymongo import MongoClient
 from urllib.parse import quote_plus
 from datetime import datetime
+from dotenv import load_dotenv
 import logging
 import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,29 +23,29 @@ client = None
 db = None
 
 try:
-    # 1. Get credentials and cluster info
-    MONGO_USERNAME = "Shelton"
-    MONGO_PASSWORD = "SheltonSaru"
-    MONGO_CLUSTER_URI = "1pm.onh1q0g.mongodb.net"
+    # Get credentials from environment variables
+    MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+    MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+    MONGO_CLUSTER_URI = os.getenv("MONGO_CLUSTER_URI")
+    MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "grocery")
     
-    # 2. URL-encode the username and password using quote_plus
+    if not MONGO_USERNAME or not MONGO_PASSWORD or not MONGO_CLUSTER_URI:
+        raise ValueError("MongoDB credentials not set. Check your .env file.")
+    
+    # URL-encode the username and password
     encoded_username = quote_plus(MONGO_USERNAME)
     encoded_password = quote_plus(MONGO_PASSWORD)
 
-    # 3. Construct the secure connection string
+    # Construct the secure connection string
     MONGO_URI = (
         f"mongodb+srv://{encoded_username}:{encoded_password}@{MONGO_CLUSTER_URI}/"
         f"?retryWrites=true&w=majority&appName=1PM"
     )
-
-    if not MONGO_USERNAME or not MONGO_PASSWORD:
-        raise ValueError("MongoDB credentials not set.")
         
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) 
     client.admin.command('ismaster')
     
-    db = client.grocery
-    # Collection will be determined dynamically based on year
+    db = client[MONGO_DB_NAME]
 
     logging.info("Successfully connected to MongoDB.")
 except Exception as e:
